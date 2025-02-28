@@ -134,6 +134,7 @@ K = 10; % 最近邻数量
 t1 = 1.0; % 模态内邻居热核参数
 t2 = 2.0; % 模态内非邻居热核参数
 t3 = 1.0; % 模态间热核参数
+d = 2; % 低维空间维度（可调整
 
 % 计算全局亲和矩阵
 W_global = compute_global_affinity(X_modes, K, t1, t2, t3);
@@ -151,8 +152,192 @@ xlabel('样本索引');
 ylabel('样本索引');
 
 
+% 计算拉普拉斯矩阵
+L = compute_laplacian(W_global);
+
+% 显示部分矩阵
+disp('L 的前5x5块：');
+disp(L(1:5, 1:5));
+
+% 可视化 L
+figure;
+imagesc(L);
+colorbar;
+title('拉普拉斯矩阵 L');
+xlabel('样本索引');
+ylabel('样本索引');
 
 
+% 验证：检查每行和是否接近零
+row_sums = sum(L, 2);
+disp('L 每行和的前5个值（应接近零）：');
+disp(row_sums(1:5));
+
+% 计算投影矩阵 P
+X = [X_vis_1; X_vis_2; X_vis_3]; % N x D (600 x 3)
+
+P = compute_projection_matrix(X, L, d);
+
+% 显示结果
+disp('投影矩阵 P (D x d):');
+disp(P);
+
+% 可视化低维投影
+Y = X * P; % N x d
+figure;
+scatter(Y(1:200, 1), Y(1:200, 2), 50, 'r+', 'DisplayName', 'Mode 1');
+hold on;
+scatter(Y(201:400, 1), Y(201:400, 2), 50, 'b*', 'DisplayName', 'Mode 2');
+scatter(Y(401:600, 1), Y(401:600, 2), 50, 'go', 'DisplayName', 'Mode 3');
+title('低维投影结果 (MMJP)');
+xlabel('维度 1');
+ylabel('维度 2');
+legend;
+grid on;
+hold off;
+%%--------------------测试---------------------------
+X_train = [X_vis_1; X_vis_2; X_vis_3];
+X_train_modes = {X_vis_1, X_vis_2, X_vis_3};
+mode_labels_case1 = [ones(200, 1); 2 * ones(200, 1)];
+mode_labels_case2 = [ones(200, 1); 2 * ones(200, 1); 3 * ones(200, 1)];
+alpha = 0.01; % 置信水平 99%（1 - alpha = 0.99）
+% 计算统计量
+[T2_case1, Q_case1, T2_limits, Q_limits, Lambda] = compute_monitoring_stats(X_train_modes, test_case1(:,1:3), P, mode_labels_case1, alpha);
+[T2_case2, Q_case2, ~, ~, ~] = compute_monitoring_stats(X_train_modes, test_case2(:,1:3), P, mode_labels_case2, alpha);
+
+% 可视化 Case 1
+figure;
+subplot(2, 1, 1);
+plot(T2_case1, 'b-', 'LineWidth', 1.5); hold on;
+plot([1 400], [T2_limits(1) T2_limits(1)], 'r--', 'LineWidth', 1.5);
+plot([200 200], ylim, 'k--');
+plot(201:400, T2_limits(2) * ones(200, 1), 'r--', 'LineWidth', 1.5);
+title('T^2 统计量 (Case 1)');
+ylabel('T^2'); xlabel('样本索引');
+legend('T^2', '控制限');
+grid on; hold off;
+
+subplot(2, 1, 2);
+plot(Q_case1, 'b-', 'LineWidth', 1.5); hold on;
+plot([1 400], [Q_limits(1) Q_limits(1)], 'r--', 'LineWidth', 1.5);
+plot([200 200], ylim, 'k--');
+plot(201:400, Q_limits(2) * ones(200, 1), 'r--', 'LineWidth', 1.5);
+title('Q 统计量 (Case 1)');
+ylabel('Q'); xlabel('样本索引');
+legend('Q', '控制限');
+grid on; hold off;
+
+% 可视化 Case 2
+figure;
+subplot(2, 1, 1);
+plot(T2_case2, 'b-', 'LineWidth', 1.5); hold on;
+plot([1 600], [T2_limits(1) T2_limits(1)], 'r--', 'LineWidth', 1.5);
+plot([200 200], ylim, 'k--');
+plot(201:400, T2_limits(2) * ones(200, 1), 'r--', 'LineWidth', 1.5);
+plot([400 400], ylim, 'k--');
+plot(401:600, T2_limits(3) * ones(200, 1), 'r--', 'LineWidth', 1.5);
+title('T^2 统计量 (Case 2)');
+ylabel('T^2'); xlabel('样本索引');
+legend('T^2', '控制限');
+grid on; hold off;
+
+subplot(2, 1, 2);
+plot(Q_case2, 'b-', 'LineWidth', 1.5); hold on;
+plot([1 600], [Q_limits(1) Q_limits(1)], 'r--', 'LineWidth', 1.5);
+plot([200 200], ylim, 'k--');
+plot(201:400, Q_limits(2) * ones(200, 1), 'r--', 'LineWidth', 1.5);
+plot([400 400], ylim, 'k--');
+plot(401:600, Q_limits(3) * ones(200, 1), 'r--', 'LineWidth', 1.5);
+title('Q 统计量 (Case 2)');
+ylabel('Q'); xlabel('样本索引');
+legend('Q', '控制限');
+grid on; hold off;
+
+
+
+%% 计算 T2 和 Q 统计量及控制限
+function [T2_stats, Q_stats, T2_limits, Q_limits, Lambda] = compute_monitoring_stats(X_train_modes, X_test, P, mode_labels, alpha)
+    C = length(X_train_modes);
+    n_samples = size(X_test, 1);
+    d = size(P, 2);
+    D = size(P, 1);
+    
+    % 训练阶段：计算每个模态的协方差矩阵
+    Lambda = cell(C, 1);
+    Y_train = cell(C, 1);
+    for c = 1:C
+        Xc = X_train_modes{c};
+        nc = size(Xc, 1);
+        Y_train{c} = Xc * P; % 低维投影
+        Lambda{c} = (Y_train{c}' * Y_train{c}) / (nc - 1); % 协方差矩阵
+    end
+    
+    % 测试阶段：计算 T2 和 Q 统计量
+    T2_stats = zeros(n_samples, 1);
+    Q_stats = zeros(n_samples, 1);
+    T2_limits = zeros(C, 1);
+    Q_limits = zeros(C, 1);
+    
+    for i = 1:n_samples
+        x_new = X_test(i, :);
+        c = mode_labels(i); % 测试样本的模态标签
+        y_new = P' * x_new'; % 低维投影
+        T2_stats(i) = y_new' * inv(Lambda{c}) * y_new; % T2 统计量
+        residual = (eye(D) - P * P') * x_new'; % 残差
+        Q_stats(i) = residual' * residual; % Q 统计量
+    end
+    
+    % 计算控制限
+    for c = 1:C
+        nc = size(X_train_modes{c}, 1);
+        T2_limits(c) = (d * (nc - 1)) / (nc - d) * finv(alpha, d, nc - d); % T2 控制限
+        
+        % Q 控制限（简化估计）
+        residuals = (eye(D) - P * P') * X_train_modes{c}';
+        Q_train = sum(residuals.^2, 1)';
+        theta1 = mean(Q_train);
+        theta2 = var(Q_train);
+        h = 1 - (2 * theta1 * theta2) / (3 * theta2^2);
+        g = theta2 / (2 * theta1);
+        Q_limits(c) = g * chi2inv(alpha, h); % Q 控制限
+    end
+end
+
+%% 计算投影矩阵函数（公式7）
+function P = compute_projection_matrix(X, L, d)
+    % 输入：
+    % X - 数据矩阵 (N x D)
+    % L - 拉普拉斯矩阵 (N x N)
+    % d - 低维空间维度
+    % 输出：
+    % P - 投影矩阵 (D x d)
+    
+    % 计算 X * L * X'
+    M = X' * L * X;
+    
+    % 特征值分解
+    [V, D] = eig(M);
+    eigenvalues = diag(D);
+    
+    % 按特征值从小到大排序
+    [~, idx] = sort(eigenvalues);
+    P = V(:, idx(1:d)); % 取前d个最小特征值对应的特征向量
+    
+    % 正交化（确保 P' * P = I）
+    P = orth(P);
+end
+
+%% 计算拉普拉斯矩阵函数
+function L = compute_laplacian(W_global)
+    % 输入：W_global - 全局亲和矩阵 (N x N)
+    % 输出：L - 拉普拉斯矩阵 (N x N)
+    
+    % 计算度矩阵 D
+    D = diag(sum(W_global, 2)); % 每行和作为对角元素
+    
+    % 计算拉普拉斯矩阵 L = D - W_global
+    L = D - W_global;
+end
 
 
 %% 计算全局亲和矩阵函数
