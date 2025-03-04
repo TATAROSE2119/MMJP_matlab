@@ -128,16 +128,74 @@ xlabel('Sample Index');
 ylabel('Sample Index');
 
 X_modes = {X_vis_1, X_vis_2, X_vis_3};
-
+X = [X_vis_1; X_vis_2; X_vis_3]; % N x D (600 x 3)
 % 参数设置
 K = 10; % 最近邻数量
 t1 = 1.0; % 模态内邻居热核参数
 t2 = 2.0; % 模态内非邻居热核参数
 t3 = 1.0; % 模态间热核参数
-d =3; % 低维空间维度（可调整
+d =2; % 低维空间维度（可调整
+lambda=0.1;
+max_iter=20;
+tol=1e-6;
+
+
+
+alpha=1;
+
+beta=1;
+
 
 % 计算全局亲和矩阵
 W_global = compute_global_affinity(X_modes, K, t1, t2, t3);
+% 计算拉普拉斯矩阵
+L = compute_laplacian(W_global);
+[V, D] = eig(X' * L * X);
+[eigenvalues, idx] = sort(diag(D));
+P = V(:, idx(1:d));
+P = orth(P);
+
+
+%% 迭代优化
+J_prev = inf;
+for iter = 1:max_iter
+    % 步骤 1：固定 P，优化 alpha 和 beta
+    A = [];
+    b = [];
+    for c = 1:length(X_modes)
+        [W_D, W_A] = compute_intra_adjacency_matrix(X_modes{c}, K, t1, t2);
+        
+        W_intra_c = W_D + W_A;
+        A = [A; W_D(:) W_A(:)]; % 使用 (:) 替代 vec
+        b = [b; W_intra_c(:)];
+    end
+    coeffs = (A' * A) \ (A' * b);
+    alpha = coeffs(1);
+    beta = coeffs(2);
+    
+    % 步骤 2：固定 alpha 和 beta，优化 P
+    W_global = compute_global_affinity(X_modes, alpha, beta, K, t1, t2, t3);
+    L = compute_laplacian(W_global);
+    M = X' * L * X;
+    [V, D] = eig(M);
+    [eigenvalues, idx] = sort(diag(D));
+    P_new = V(:, idx(1:d));
+    P_new = orth(P_new);
+    
+    % 计算目标函数
+    J = objective_function(X_modes, alpha, beta, P_new, lambda, K, t1, t2, t3);
+    
+    % 检查收敛
+    if abs(J_prev - J) < tol
+        break;
+    end
+    P = P_new;
+    J_prev = J;
+    
+    fprintf('Iteration %d: J = %.4f, alpha = %.4f, beta = %.4f\n', iter, J, alpha, beta);
+end
+
+
 
 % 显示部分矩阵
 disp('W_global 的前5x5块：');
@@ -152,8 +210,7 @@ xlabel('样本索引');
 ylabel('样本索引');
 
 
-% 计算拉普拉斯矩阵
-L = compute_laplacian(W_global);
+
 
 % 显示部分矩阵
 disp('L 的前5x5块：');
@@ -174,9 +231,9 @@ disp('L 每行和的前5个值（应接近零）：');
 disp(row_sums(1:5));
 
 % 计算投影矩阵 P
-X = [X_vis_1; X_vis_2; X_vis_3]; % N x D (600 x 3)
 
-P = compute_projection_matrix(X, L, d);
+
+%P = compute_projection_matrix(X, L, d);
 
 % 显示结果
 disp('投影矩阵 P (D x d):');
@@ -354,7 +411,7 @@ function W_global = compute_global_affinity(X_modes, K, t1, t2, t3)
     
     for c = 1:C
         % 模态内矩阵
-        W_intra{c} = compute_intra_adjacency_matrix(X_modes{c}, K, t1, t2);
+        [W_D,W_A] = compute_intra_adjacency_matrix(X_modes{c}, K, t1, t2);
         
         % 模态间矩阵
         for p = 1:C
@@ -428,7 +485,7 @@ function W_inter = compute_intermode_adjacency(Xc, Xp, K, t3)
     end
 end
 % 3. 计算模态内邻接矩阵
-function W_intra = compute_intra_adjacency_matrix(X, K, t1, t2)
+function [W_D,W_A] = compute_intra_adjacency_matrix(X, K, t1, t2)
     % 计算模态内邻接矩阵
     % 输入：X（模式数据矩阵，n_samples x d），K（KNN 邻居数），t1, t2（热核参数）
     % 输出：W_intra（模态内邻接矩阵，n_samples x n_samples）
@@ -480,7 +537,7 @@ function W_intra = compute_intra_adjacency_matrix(X, K, t1, t2)
     end
     
     % 3. 融合距离和角度矩阵
-    W_intra = W_D + W_A;
+    %W_intra = W_D + W_A;
 end
 
 %% 三维椭球生成函数（保存为ellipsoid3.m）
@@ -597,4 +654,53 @@ function plot_mode_identification(test_case, case_num, exemplars)
     xlabel('Sample index'); ylabel('Mode');
     ylim([0 4]);
     grid on;
+end
+
+%% 计算 HSIC
+function hsic_val = compute_hsic(Y)
+    % Y: n x d 矩阵，每列是一个维度
+    [n, d] = size(Y);
+    H = eye(n) - ones(n, n) / n; % 中心化矩阵
+    hsic_val = 0;
+    
+    for k = 1:d-1
+        for l = k+1:d
+            % 计算核矩阵
+            dist_k = pdist2(Y(:, k), Y(:, k), 'euclidean');
+            dist_l = pdist2(Y(:, l), Y(:, l), 'euclidean');
+            sigma_k = median(dist_k(:));
+            sigma_l = median(dist_l(:));
+            K_k = exp(-dist_k.^2 / (2 * sigma_k^2));
+            K_l = exp(-dist_l.^2 / (2 * sigma_l^2));
+            % HSIC
+            hsic_val = hsic_val + trace(K_k * H * K_l * H) / ((n-1)^2);
+        end
+    end
+end
+
+%% 优化目标函数
+function J = objective_function(X_modes, alpha, beta, P, lambda, K, t1, t2, t3)
+    C = length(X_modes);
+    W_global = compute_global_affinity(X_modes, alpha, beta, K, t1, t2, t3);
+    L = compute_laplacian(W_global);
+    X = vertcat(X_modes{:});
+    J_mmjp = trace(P' * X' * L * X * P);
+    
+    % 计算 HSIC
+    J_hsic = 0;
+    for c = 1:C
+        Y_c = X_modes{c} * P;
+        J_hsic = J_hsic + compute_hsic(Y_c);
+    end
+    
+    % 假设 W_intra,c 初始为 W_D + W_A
+    J_fit = 0;
+    for c = 1:C
+        [W_D, W_A] = compute_W_D_W_A(X_modes{c}, K, t1, t2);
+        W_intra_c = W_D + W_A; % 初始理想值
+        W_fit = alpha * W_D + beta * W_A;
+        J_fit = J_fit + norm(W_intra_c - W_fit, 'fro')^2;
+    end
+    
+    J = J_fit + lambda * J_hsic;
 end
