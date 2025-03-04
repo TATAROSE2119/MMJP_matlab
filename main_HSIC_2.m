@@ -43,7 +43,7 @@ X = [X_vis_1; X_vis_2; X_vis_3];
 
 % 参数设置
 K = 10; t1 = 1.0; t2 = 2.0; t3 = 1.0; d = 2;
-mu = 1.0; lambda = 0.01; max_iter = 50; tol = 1000; eta = 0.1; % 调整后的参数
+mu = 10; lambda = 0.01; max_iter = 50; tol = 100000; eta = 0.1; % 调整后的参数
 alpha = 1; beta = 1; % 固定值
 
 % 初始化
