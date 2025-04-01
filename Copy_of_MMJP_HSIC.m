@@ -9,7 +9,7 @@ train_data=train_data';
 %train_data = train_data(:, 2:53); % 去除时间戳，保留 52 个变量
 
 % 加载测试数据 (d02_te.dat: 故障 2 数据, 960 个样本)
-test_data = load('d06_te.dat'); % 假设 53 列（第 1 列为时间戳）
+test_data = load('d02_te.dat'); % 假设 53 列（第 1 列为时间戳）
 %test_data = test_data(:, 2:53); % 去除时间戳，保留 52 个变量
 
 % 使用所有 52 个变量
@@ -30,7 +30,7 @@ plot_mode_identification(X_test, 2, exemplars); % 故障 2
 %% 训练 W_intra 和 P
 % 参数设置
 K = 10; t1 = 1.0; t2 = 2.0; t3 = 1.0; d = 9; % d 设为 9
-mu = 10; lambda = 0.01; max_iter = 70; tol = 1e-5; eta = 0.1; % 调整后的参数
+mu = 10; lambda = 0.01; max_iter = 100; tol = 1e-5; eta = 0.1; % 调整后的参数
 alpha = 1; beta = 1; % 固定值
 
 % 初始化
